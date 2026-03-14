@@ -8,57 +8,77 @@
     };
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    fenix.url = "github:nix-community/fenix";
   };
 
-  outputs = { self, flake-utils, nixpkgs, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      flake-utils,
+      nixpkgs,
+      fenix,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        rustToolchain = fenix.packages.${system}.latest;
 
-        cargoBuildInputs = with pkgs; lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.CoreServices
-        ];
+        cargoBuildInputs =
+          with pkgs;
+          lib.optionals stdenv.isDarwin [
+            darwin.apple_sdk.frameworks.CoreServices
+          ];
 
         rustlings =
-          pkgs.rustPlatform.buildRustPackage {
-            name = "rustlings";
-            version = "5.5.1";
+          (pkgs.makeRustPlatform {
+            rustc = rustToolchain.toolchain;
+            cargo = rustToolchain.toolchain;
+          }).buildRustPackage
+            {
+              name = "rustlings";
+              version = "5.5.1";
+              # Entering the dev shell should not depend on integration tests that
+              # expect the exercise files to remain in their pristine upstream state.
+              doCheck = false;
 
-            buildInputs = cargoBuildInputs;
+              buildInputs = cargoBuildInputs;
 
-            src = with pkgs.lib; cleanSourceWith {
-              src = self;
-              # a function that returns a bool determining if the path should be included in the cleaned source
-              filter = path: type:
-                let
-                  # filename
-                  baseName = builtins.baseNameOf (toString path);
-                  # path from root directory
-                  path' = builtins.replaceStrings [ "${self}/" ] [ "" ] path;
-                  # checks if path is in the directory
-                  inDirectory = directory: hasPrefix directory path';
-                in
-                inDirectory "src" ||
-                inDirectory "tests" ||
-                hasPrefix "Cargo" baseName ||
-                baseName == "info.toml";
+              src =
+                with pkgs.lib;
+                cleanSourceWith {
+                  src = self;
+                  filter =
+                    path: type:
+                    let
+                      baseName = builtins.baseNameOf (toString path);
+                      path' = builtins.replaceStrings [ "${self}/" ] [ "" ] path;
+                      inDirectory = directory: hasPrefix directory path';
+                    in
+                    inDirectory "src"
+                    || inDirectory "tests"
+                    || inDirectory "exercises"
+                    || hasPrefix "Cargo" baseName
+                    || baseName == "info.toml";
+                };
+
+              cargoLock.lockFile = ./Cargo.lock;
             };
-
-            cargoLock.lockFile = ./Cargo.lock;
-          };
       in
       {
         devShell = pkgs.mkShell {
-          RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+          RUST_SRC_PATH = "${rustToolchain.rust-src}/lib/rustlib/src/rust/library";
 
-          buildInputs = with pkgs; [
-            cargo
-            rustc
-            rust-analyzer
-            rustlings
-            rustfmt
-            clippy
-          ] ++ cargoBuildInputs;
+          buildInputs =
+            with pkgs;
+            [
+              rustToolchain.toolchain
+              rustToolchain.rust-analyzer
+              rustlings
+            ]
+            ++ cargoBuildInputs;
         };
-      });
+      }
+    );
 }

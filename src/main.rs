@@ -329,7 +329,17 @@ async fn main() {
             let exercise_check_list_ref = Arc::clone(&exercise_check_list);
             exercise_check_list_ref.lock().unwrap().statistics.total_time = total_time as u32;
             let serialized = serde_json::to_string_pretty(&*exercise_check_list.lock().unwrap()).unwrap();
-            fs::write(".github/result/check_result.json", serialized).unwrap();
+            let result_path = Path::new(".github/result/check_result.json");
+            if let Some(parent) = result_path.parent() {
+                if let Err(err) = fs::create_dir_all(parent) {
+                    eprintln!("Failed to create result directory {}: {err}", parent.display());
+                    std::process::exit(1);
+                }
+            }
+            if let Err(err) = fs::write(result_path, serialized) {
+                eprintln!("Failed to write CI result file {}: {err}", result_path.display());
+                std::process::exit(1);
+            }
         },
 
         Subcommands::Lsp(_subargs) => {
